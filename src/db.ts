@@ -202,7 +202,13 @@ export async function confirmPendingPlan(): Promise<string> {
   return pending.plan.title
 }
 
-export async function record(activity: Activity, operation: Operation, targetId = activity.activityId, notes: string | null = null) {
+export async function record(
+  activity: Activity,
+  operation: Operation,
+  targetId = activity.activityId,
+  notes: string | null = null,
+  extra: Record<string, string> = {},
+) {
   const event: StoredEvent = {
     eventId: "evt" + crypto.randomUUID().replaceAll("-", "").slice(0, 20),
     targetId,
@@ -211,15 +217,19 @@ export async function record(activity: Activity, operation: Operation, targetId 
     operation,
     occurredAt: new Date().toISOString(),
     notes,
-    payload: eventPayload(operation, notes),
+    payload: { ...eventPayload(operation, notes), ...extra },
     schemaVersion: 1,
   }
   await db.events.add(event)
 }
 
 function exportedPayload(event: StoredEvent): Record<string, string> {
-  if (event.payload?.scheduled_time) return { scheduled_time: event.payload.scheduled_time }
-  return eventPayload(event.operation, event.notes)
+  const payload: Record<string, string> = {}
+  for (const [key, value] of Object.entries(event.payload ?? {})) {
+    if (typeof value === "string" && value) payload[key] = value
+  }
+  if (!payload.scheduled_time) Object.assign(payload, eventPayload(event.operation, event.notes))
+  return payload
 }
 
 export async function exportProgress(): Promise<Blob> {

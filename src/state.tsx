@@ -8,7 +8,13 @@ type FitnessContext = {
   data: Loaded | null
   refresh: () => void
   today: string
-  mark: (activity: Activity, operation: "complete" | "skip" | "undo" | "reschedule", targetId?: string, notes?: string | null) => Promise<void>
+  mark: (
+    activity: Activity,
+    operation: "complete" | "skip" | "undo" | "reschedule",
+    targetId?: string,
+    notes?: string | null,
+    extra?: Record<string, string>,
+  ) => Promise<void>
 }
 
 export const AppState = createContext<FitnessContext | null>(null)
@@ -34,8 +40,14 @@ export function useFitness(): FitnessContext {
     }
   }, [nonce])
   const today = data?.plan ? localDate(data.plan.timezone) : localDate("Asia/Tehran")
-  async function mark(activity: Activity, operation: "complete" | "skip" | "undo" | "reschedule", targetId?: string, notes?: string | null) {
-    await record(activity, operation, targetId ?? activity.activityId, notes ?? null)
+  async function mark(
+    activity: Activity,
+    operation: "complete" | "skip" | "undo" | "reschedule",
+    targetId?: string,
+    notes?: string | null,
+    extra?: Record<string, string>,
+  ) {
+    await record(activity, operation, targetId ?? activity.activityId, notes ?? null, extra ?? {})
     refresh()
   }
   return { data, refresh, today, mark }

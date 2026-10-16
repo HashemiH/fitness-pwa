@@ -37,7 +37,7 @@ export type FitnessEvent = {
   status?: ActivityStatus
   occurredAt: string
   notes?: string | null
-  payload?: { scheduled_time?: string | null } | null
+  payload?: { scheduled_time?: string | null; weight?: string | null; reps?: string | null } | null
 }
 
 export const CLOCK = /^([01]\d|2[0-3]):[0-5]\d$/
@@ -172,6 +172,71 @@ export function calendarDayLabel(percent: number | null): string {
 export function mediaUrl(planKey: string, image: string | null | undefined, media: ReadonlyMap<string, string>): string | undefined {
   if (!image) return undefined
   return media.get(`${planKey}/${image}`)
+}
+
+const PERSIAN_DIGITS = "۰۱۲۳۴۵۶۷۸۹"
+
+export function persianDigits(value: string | number): string {
+  return String(value).replace(/\d/g, (digit) => PERSIAN_DIGITS[Number(digit)] ?? digit)
+}
+
+export function restRemaining(startedAt: number, restSeconds: number, now = Date.now()): number {
+  const elapsed = Math.max(0, Math.floor((now - startedAt) / 1000))
+  return Math.max(0, restSeconds - elapsed)
+}
+
+export type MacroRollup = {
+  available: boolean
+  consumed: { calories: number | null; protein: number | null; carbs: number | null; fat: number | null }
+  planned: { calories: number | null; protein: number | null; carbs: number | null; fat: number | null }
+}
+
+function addMacro(rows: Annotated[], key: "calories" | "protein_g" | "carbs_g" | "fat_g", completedOnly: boolean): number | null {
+  let total = 0
+  let seen = false
+  for (const row of rows) {
+    if (row.activity.kind !== "meal") continue
+    if (completedOnly && row.status !== "completed") continue
+    const value = row.activity.payload.nutrition?.[key]
+    if (value == null) continue
+    total += value
+    seen = true
+  }
+  return seen ? total : null
+}
+
+export function nutritionRollup(rows: Annotated[]): MacroRollup {
+  const planned = {
+    calories: addMacro(rows, "calories", false),
+    protein: addMacro(rows, "protein_g", false),
+    carbs: addMacro(rows, "carbs_g", false),
+    fat: addMacro(rows, "fat_g", false),
+  }
+  const consumed = {
+    calories: addMacro(rows, "calories", true),
+    protein: addMacro(rows, "protein_g", true),
+    carbs: addMacro(rows, "carbs_g", true),
+    fat: addMacro(rows, "fat_g", true),
+  }
+  return {
+    available: Object.values(planned).some((value) => value != null),
+    consumed,
+    planned,
+  }
+}
+
+export function monthCells(anchor: string): { date: string; inMonth: boolean }[] {
+  const [year, month] = anchor.split("-").map(Number)
+  const first = new Date(Date.UTC(year, month - 1, 1))
+  const offset = (first.getUTCDay() + 6) % 7
+  const gridStart = new Date(first)
+  gridStart.setUTCDate(1 - offset)
+  return Array.from({ length: 42 }, (_, index) => {
+    const day = new Date(gridStart)
+    day.setUTCDate(gridStart.getUTCDate() + index)
+    const date = day.toISOString().slice(0, 10)
+    return { date, inMonth: day.getUTCMonth() === month - 1 }
+  })
 }
 
 function inherit(activity: Activity, catalog: Activity[], events: FitnessEvent[]): ActivityStatus | null {

@@ -5,6 +5,9 @@ import {
   compareBySchedule,
   eventPayload,
   mediaUrl,
+  monthCells,
+  nutritionRollup,
+  restRemaining,
   summarize,
   type Activity,
   type FitnessEvent,
@@ -169,6 +172,40 @@ describe("completion replay", () => {
     expect(calendarDayLabel(summarize(rows, "2026-10-16", "2026-10-16").percent)).toBe("100٪")
     expect(calendarDayLabel(summarize(rows, "2026-10-17", "2026-10-17").percent)).toBe("استراحت")
     expect(summarize(rows, "2026-10-16", "2026-10-17").scheduled).toBe(1)
+  })
+
+  it("does not invent nutrition totals when meals have no macros", () => {
+    const rows = annotate([meal, lunch], [])
+    const rollup = nutritionRollup(rows)
+    expect(rollup.available).toBe(false)
+    expect(rollup.planned.calories).toBeNull()
+    expect(rollup.consumed.protein).toBeNull()
+  })
+
+  it("sums only the macros that are actually stored", () => {
+    const counted: Activity = { ...meal, payload: { ingredients: [], nutrition: { calories: 400, protein_g: 30 } } }
+    const rows = annotate([counted, lunch], [event("evt-00000001", "complete", "2026-10-16T05:00:00Z", counted.activityId)])
+    const rollup = nutritionRollup(rows)
+    expect(rollup.available).toBe(true)
+    expect(rollup.planned.calories).toBe(400)
+    expect(rollup.consumed.calories).toBe(400)
+    expect(rollup.planned.protein).toBe(30)
+    expect(rollup.planned.carbs).toBeNull()
+    expect(rollup.consumed.carbs).toBeNull()
+  })
+
+  it("computes rest from timestamps so a paused phone does not drift the clock", () => {
+    expect(restRemaining(1_000, 90, 1_000)).toBe(90)
+    expect(restRemaining(1_000, 90, 31_000)).toBe(60)
+    expect(restRemaining(1_000, 90, 200_000)).toBe(0)
+  })
+
+  it("starts the month grid on Monday", () => {
+    const cells = monthCells("2026-10-16")
+    expect(cells).toHaveLength(42)
+    expect(cells[0].date).toBe("2026-09-28")
+    expect(cells.find((cell) => cell.date === "2026-10-01")?.inMonth).toBe(true)
+    expect(cells[0].inMonth).toBe(false)
   })
 
   it("does not invent an image url when the plan or the media store has none", () => {

@@ -3,7 +3,7 @@ import { Link } from "react-router-dom"
 import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis } from "recharts"
 import { confirmPendingPlan, exportBackup, exportProgress, inspectPlanZip, requestPersistentStorage, restoreBackup, storageReport } from "./db"
 import { ActivityCard, BackupStatus, CalendarView, ConfirmationDialog, EmptyState, ErrorState, ExerciseCard, ImportPreview, MealCard, ProgressRing, SyncStatus } from "./components"
-import { annotate, calendarDayLabel, compareBySchedule, mediaUrl, summarize } from "./logic"
+import { annotate, calendarDayLabel, compareBySchedule, mediaUrl, monthCells, nutritionRollup, persianDigits, summarize } from "./logic"
 import { useApp } from "./state"
 
 export function TodayPage() {
@@ -12,18 +12,69 @@ export function TodayPage() {
   const rows = annotate(data.activities.filter((item) => item.versionId === data.plan!.versionId), data.events, data.activities)
   const todayRows = rows.filter((row) => row.activity.localDate === today).sort(compareBySchedule)
   const summary = summarize(rows, today, today)
+  const macros = nutritionRollup(todayRows)
+  const nextMeal = todayRows.find((row) => row.activity.kind === "meal" && row.status === "pending")
+  const workout = todayRows.find((row) => row.activity.kind === "workout")
   return (
     <section>
       <p className="text-sm text-mist">{today}</p>
-      <h1 className="mt-1 text-2xl font-bold">{data.plan.title}</h1>
-      <p className="mt-3 text-mint">{summary.percent === null ? "برای امروز فعالیتی نیست" : `${summary.percent}٪ انجام شده`}</p>
-      <ProgressRing percent={summary.percent} />
-      <div className="mt-4 space-y-3">
+      <h1 className="mt-1 text-2xl font-bold text-paper">{data.plan.title}</h1>
+      <div className="mt-4 flex items-center gap-4 rounded-3xl bg-card p-4">
+        <ProgressRing percent={summary.percent} />
+        <div>
+          <p className="text-lg font-bold">امروز</p>
+          <p className="text-sm leading-7 text-mist">
+            {summary.percent === null ? "برای امروز فعالیتی نیست" : `${persianDigits(summary.completed)} انجام‌شده از ${persianDigits(summary.scheduled)}`}
+          </p>
+        </div>
+      </div>
+      {macros.available ? (
+        <div className="mt-3 space-y-2">
+          <MacroLine label="کالری" consumed={macros.consumed.calories} planned={macros.planned.calories} unit="kcal" />
+          <MacroLine label="پروتئین" consumed={macros.consumed.protein} planned={macros.planned.protein} unit="گرم" />
+          <MacroLine label="کربوهیدرات" consumed={macros.consumed.carbs} planned={macros.planned.carbs} unit="گرم" />
+          <MacroLine label="چربی" consumed={macros.consumed.fat} planned={macros.planned.fat} unit="گرم" />
+        </div>
+      ) : (
+        <p className="mt-3 rounded-3xl bg-card p-4 text-sm leading-7 text-mist">کالری و درشت‌مغذی در این برنامه ثبت نشده است. عدد ساخته نمی‌شود.</p>
+      )}
+      <div className="mt-3 space-y-2">
+        <div className="rounded-3xl bg-card p-4">
+          <p className="text-sm text-mist">وعده بعدی</p>
+          <p className="font-bold">{nextMeal ? `${nextMeal.scheduledTime ?? ""} ${nextMeal.activity.title}` : "وعده بازی نمانده"}</p>
+        </div>
+        <div className="rounded-3xl bg-card p-4">
+          <p className="text-sm text-mist">تمرین امروز</p>
+          <p className="font-bold">{workout ? workout.activity.title : "تمرینی برای امروز نیست"}</p>
+        </div>
+      </div>
+      <h2 className="mb-2 mt-5 text-lg font-bold">برنامه امروز</h2>
+      <div className="space-y-3">
         {todayRows.map((row) => (
           <ActivityCard key={row.activity.activityId} row={row} />
         ))}
+        {todayRows.length === 0 && <p className="rounded-3xl bg-card p-4 text-sm text-mist">برای امروز فعالیتی نیست.</p>}
       </div>
     </section>
+  )
+}
+
+function MacroLine({ label, consumed, planned, unit }: { label: string; consumed: number | null; planned: number | null; unit: string }) {
+  if (planned == null) return null
+  const done = consumed ?? 0
+  const width = Math.max(0, Math.min(100, (done / planned) * 100))
+  return (
+    <div className="rounded-2xl bg-card p-3">
+      <div className="flex justify-between text-sm">
+        <span>{label}</span>
+        <span className="text-mist">
+          {persianDigits(done)} / {persianDigits(planned)} {unit}
+        </span>
+      </div>
+      <div className="mt-2 h-2 overflow-hidden rounded-full bg-line">
+        <div className="h-full rounded-full bg-mint" style={{ width: `${width}%` }} />
+      </div>
+    </div>
   )
 }
 
@@ -88,7 +139,7 @@ export function ProgressPage() {
   const chart = Array.from({ length: 7 }, (_, index) => {
     const day = shift(weekStart, index)
     const summary = summarize(rows, day, day)
-    return { day: day.slice(8), percent: summary.percent ?? 0 }
+    return { day: day.slice(8), percent: summary.percent }
   })
   return (
     <section>
@@ -96,9 +147,9 @@ export function ProgressPage() {
       <div className="mt-4 h-40 rounded-3xl bg-card p-3">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={chart}>
-            <XAxis dataKey="day" stroke="#c5d0dc" />
+            <XAxis dataKey="day" stroke="#98A7B2" />
             <YAxis hide domain={[0, 100]} />
-            <Bar dataKey="percent" fill="#3ddc97" radius={8} />
+            <Bar dataKey="percent" fill="#20E3A2" radius={8} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -114,6 +165,7 @@ export function ProgressPage() {
           </article>
         ))}
       </div>
+      <p className="mt-4 rounded-3xl bg-card p-4 text-sm leading-7 text-mist">ستون خالی یعنی فعالیتی برای محاسبه نبود، از جمله روز استراحت. وزن بدن ذخیره نمی‌شود و نمودار وزن ساخته نمی‌شود.</p>
     </section>
   )
 }
@@ -124,11 +176,12 @@ export function CalendarPage() {
   if (!data?.plan) return <MissingPlan />
   const rows = annotate(data.activities.filter((item) => item.versionId === data.plan!.versionId), data.events, data.activities)
   const days = [...new Set(rows.map((row) => row.activity.localDate))].sort()
-  const shown = selected ?? days[0]
+  const shown = selected ?? days[0] ?? data.plan.startDate
   const detail = rows.filter((row) => row.activity.localDate === shown).sort(compareBySchedule)
-  const calendarDays = days.map((day) => {
-    const summary = summarize(rows, day, day)
-    return { day, label: calendarDayLabel(summary.percent) }
+  const calendarDays = monthCells(shown).map((cell) => {
+    const summary = summarize(rows, cell.date, cell.date)
+    const has = rows.some((row) => row.activity.localDate === cell.date)
+    return { day: cell.date, label: has ? calendarDayLabel(summary.percent) : "" }
   })
   return (
     <section>
@@ -261,6 +314,14 @@ export function MorePage() {
       {error ? <ErrorState message={error} /> : <p className="rounded-3xl bg-card p-4 text-sm leading-7 text-mist">{message}</p>}
       <BackupStatus text={diag} />
       <SyncStatus text={storage} />
+      <section className="rounded-3xl bg-card p-4 text-sm leading-7">
+        <h2 className="text-lg font-bold">همگام‌سازی محلی</h2>
+        <p className="mt-2 text-mist">
+          برنامه روی GitHub Pages با https باز می‌شود. Safari اجازه نمی‌دهد همین صفحه به یک آدرس http داخل شبکه خانه وصل شود، و گواهی خودامضا را هم قبول نمی‌کند. تا وقتی یک نام و گواهی مورد اعتماد و آزمایش روی خود آیفون نباشد، اتصال مستقیم ساخته نمی‌شود.
+        </p>
+        <p className="mt-2">مسیر آماده همین جابه‌جایی ZIP است: ورود برنامه، خروجی پیشرفت، پشتیبان و بازیابی.</p>
+        <p className="mt-2 text-mist">نسخه ۲.۰.۰ · هنوز روی آیفون واقعی تأیید نشده</p>
+      </section>
     </section>
   )
 }

@@ -31,8 +31,8 @@ function Shell() {
           <Tab to="/" label="امروز" />
           <Tab to="/nutrition" label="تغذیه" />
           <Tab to="/workout" label="تمرین" />
-          <Tab to="/progress" label="پیشرفت" />
           <Tab to="/calendar" label="تقویم" />
+          <Tab to="/progress" label="پیشرفت" />
         </nav>
       </div>
     </AppState.Provider>
@@ -41,7 +41,7 @@ function Shell() {
 
 function Tab({ to, label }: { to: string; label: string }) {
   return (
-    <NavLink to={to} className={({ isActive }) => `min-h-11 min-w-14 rounded-xl px-2 py-2 text-center text-xs ${isActive ? "bg-mint text-ink" : "text-mist"}`}>
+    <NavLink to={to} end={to === "/"} className={({ isActive }) => `min-h-11 min-w-14 rounded-xl px-2 py-2 text-center text-xs ${isActive ? "bg-mint font-bold text-ink" : "text-mist"}`}>
       {label}
     </NavLink>
   )

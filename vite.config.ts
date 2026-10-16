@@ -10,7 +10,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["icon-192.png", "icon-512.png"],
+      includeAssets: ["favicon.png", "icon-192.png", "icon-512.png"],
       manifest: {
         name: "تناسب",
         short_name: "تناسب",
@@ -18,14 +18,15 @@ export default defineConfig({
         lang: "fa",
         dir: "rtl",
         display: "standalone",
-        background_color: "#14181d",
-        theme_color: "#14181d",
+        background_color: "#080D12",
+        theme_color: "#080D12",
         id: pagesBase,
         start_url: pagesBase,
         scope: pagesBase,
         icons: [
           { src: "icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
           { src: "icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+          { src: "icon-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
         ],
       },
       workbox: {

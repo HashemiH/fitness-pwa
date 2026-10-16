@@ -1,5 +1,5 @@
-import type { ReactNode } from "react"
-import { CLOCK, annotate, reduceStatus, type Activity } from "./logic"
+import { useEffect, useState, type ReactNode } from "react"
+import { CLOCK, annotate, persianDigits, reduceStatus, restRemaining, type Activity } from "./logic"
 import { useApp } from "./state"
 
 const STATUS: Record<string, string> = {
@@ -28,9 +28,25 @@ function Clock({ row }: { row: Annotated }) {
 }
 
 export function ProgressRing({ percent }: { percent: number | null }) {
+  const value = percent == null ? 0 : Math.max(0, Math.min(100, percent))
+  const radius = 42
+  const length = 2 * Math.PI * radius
   return (
-    <div className="mt-4 grid h-24 w-24 place-items-center rounded-full text-lg font-bold" style={{ background: `conic-gradient(#3ddc97 ${percent ?? 0}%, #2a3440 0)` }}>
-      <span className="grid h-16 w-16 place-items-center rounded-full bg-ink">{percent === null ? "—" : `${Math.round(percent)}`}</span>
+    <div className="relative grid h-28 w-28 place-items-center" aria-label={percent == null ? "درصدی نیست" : `${percent} درصد`}>
+      <svg viewBox="0 0 100 100" className="h-28 w-28 -rotate-90">
+        <circle cx="50" cy="50" r={radius} fill="none" stroke="#293640" strokeWidth="8" />
+        <circle
+          cx="50"
+          cy="50"
+          r={radius}
+          fill="none"
+          stroke="#20E3A2"
+          strokeWidth="8"
+          strokeLinecap="round"
+          strokeDasharray={`${(value / 100) * length} ${length}`}
+        />
+      </svg>
+      <span className="absolute text-2xl font-bold text-paper">{percent == null ? "—" : persianDigits(Math.round(percent))}</span>
     </div>
   )
 }
@@ -89,7 +105,12 @@ export function MealCard({ meal }: { meal: Activity }) {
         ))}
         {(meal.payload.ingredients ?? []).length === 0 && <li>مواد غذایی در برنامه نوشته نشده است.</li>}
       </ul>
-      <p className="mt-2 text-sm text-mist">{facts?.calories == null ? "کالری ثبت نشده" : `${facts.calories} کالری`}</p>
+      <p className="mt-2 text-sm text-mist">
+        {facts?.calories == null ? "کالری ثبت نشده" : `${persianDigits(facts.calories)} کالری`}
+        {facts?.protein_g == null ? "" : ` · پروتئین ${persianDigits(facts.protein_g)}`}
+        {facts?.carbs_g == null ? "" : ` · کربوهیدرات ${persianDigits(facts.carbs_g)}`}
+        {facts?.fat_g == null ? "" : ` · چربی ${persianDigits(facts.fat_g)}`}
+      </p>
       {meal.payload.notes ? <p className="mt-1 text-sm text-mist">{meal.payload.notes}</p> : null}
       <p className="mt-1 text-sm">{STATUS[status]}</p>
       <div className="mt-3 flex flex-wrap gap-2">
@@ -113,35 +134,103 @@ export function MealCard({ meal }: { meal: Activity }) {
   )
 }
 
+export function RestTimer({ seconds }: { seconds: number }) {
+  const [startedAt, setStartedAt] = useState<number | null>(null)
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (startedAt == null) return
+    const tick = () => setNow(Date.now())
+    const timer = window.setInterval(tick, 250)
+    const onVisible = () => {
+      if (document.visibilityState === "visible") tick()
+    }
+    document.addEventListener("visibilitychange", onVisible)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener("visibilitychange", onVisible)
+    }
+  }, [startedAt])
+  const left = startedAt == null ? seconds : restRemaining(startedAt, seconds, now)
+  const label = `${String(Math.floor(left / 60)).padStart(2, "0")}:${String(left % 60).padStart(2, "0")}`
+  return (
+    <div className="mt-3 rounded-2xl bg-elevated p-3">
+      <p className="text-sm text-mist">استراحت</p>
+      <p className="text-3xl font-bold text-paper" aria-live="polite">
+        {persianDigits(label)}
+      </p>
+      <button className="mt-2 min-h-11 w-full rounded-2xl bg-mint font-bold text-ink" onClick={() => setStartedAt(Date.now())}>
+        {startedAt == null ? "شروع استراحت" : left === 0 ? "دوباره" : "از نو"}
+      </button>
+    </div>
+  )
+}
+
 export function ExerciseCard({ session, exercise, imageUrl }: { session: Activity; exercise: Exercise; imageUrl?: string }) {
   const { data, mark } = useApp()
+  const [drafts, setDrafts] = useState<Record<string, { weight: string; reps: string }>>({})
   return (
     <div className="mt-4 border-t border-line pt-3">
-      {imageUrl ? <img src={imageUrl} alt={exercise.name} className="mb-3 h-40 w-full rounded-2xl object-cover" /> : null}
-      <strong>{exercise.name}</strong>
-      {exercise.instructions ? <p className="mt-1 text-sm text-mist">{exercise.instructions}</p> : null}
+      {imageUrl ? <img src={imageUrl} alt={exercise.name} className="mb-3 h-44 w-full rounded-2xl object-cover" /> : (
+        <p className="mb-3 rounded-2xl bg-elevated px-3 py-6 text-center text-sm text-mist">تصویری برای این حرکت در برنامه نیست.</p>
+      )}
+      <strong className="text-lg">{exercise.name}</strong>
+      {exercise.instructions ? <p className="mt-1 text-sm leading-7 text-mist">{exercise.instructions}</p> : null}
       <p className="mt-1 text-sm text-mist">
-        {exercise.sets.length} ست
-        {exercise.rest_seconds ? ` · استراحت ${exercise.rest_seconds} ثانیه` : ""}
-        {exercise.duration_minutes ? ` · ${exercise.duration_minutes} دقیقه` : ""}
+        {persianDigits(exercise.sets.length)} ست
+        {exercise.rest_seconds ? ` · استراحت ${persianDigits(exercise.rest_seconds)} ثانیه` : ""}
+        {exercise.duration_minutes ? ` · ${persianDigits(exercise.duration_minutes)} دقیقه` : ""}
       </p>
       <div className="mt-2 space-y-2">
         {exercise.sets.map((item) => {
-          const done = reduceStatus((data?.events ?? []).filter((event) => event.targetId === item.set_id)) === "completed"
+          const related = (data?.events ?? []).filter((event) => event.targetId === item.set_id)
+          const done = reduceStatus(related) === "completed"
+          const saved = [...related].reverse().find((event) => event.operation === "complete")?.payload
+          const draft = drafts[item.set_id] ?? { weight: saved?.weight ?? "", reps: saved?.reps ?? item.reps ?? "" }
           return (
-            <button
-              key={item.set_id}
-              className={`min-h-11 w-full rounded-2xl border px-3 text-right ${done ? "border-mint text-mint" : "border-line"}`}
-              onClick={() => mark(session, done ? "undo" : "complete", item.set_id)}
-            >
-              ست {item.number}
-              {item.reps ? ` · ${item.reps} تکرار` : ""}
-              {item.weight ? ` · ${item.weight}` : ""}
-            </button>
+            <div key={item.set_id} className={`rounded-2xl border p-3 ${done ? "border-mint" : "border-line"}`}>
+              <div className="flex items-center justify-between gap-2">
+                <strong>ست {persianDigits(item.number)}</strong>
+                <span className="text-sm text-mist">{item.reps ? `${persianDigits(item.reps)} تکرار` : "تکرار در برنامه نیست"}</span>
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <label className="text-sm text-mist">
+                  وزن
+                  <input
+                    className="mt-1 min-h-11 w-full rounded-xl bg-ink px-3 text-paper"
+                    inputMode="decimal"
+                    value={draft.weight}
+                    aria-label={`وزن ست ${item.number}`}
+                    onChange={(event) => setDrafts((current) => ({ ...current, [item.set_id]: { ...draft, weight: event.target.value } }))}
+                  />
+                </label>
+                <label className="text-sm text-mist">
+                  تکرار انجام‌شده
+                  <input
+                    className="mt-1 min-h-11 w-full rounded-xl bg-ink px-3 text-paper"
+                    inputMode="numeric"
+                    value={draft.reps}
+                    aria-label={`تکرار ست ${item.number}`}
+                    onChange={(event) => setDrafts((current) => ({ ...current, [item.set_id]: { ...draft, reps: event.target.value } }))}
+                  />
+                </label>
+              </div>
+              <button
+                className="mt-2 min-h-11 w-full rounded-2xl bg-mint font-bold text-ink"
+                onClick={() => {
+                  const extra: Record<string, string> = {}
+                  if (draft.weight.trim()) extra.weight = draft.weight.trim()
+                  if (draft.reps.trim()) extra.reps = draft.reps.trim()
+                  void mark(session, done ? "undo" : "complete", item.set_id, null, extra)
+                }}
+              >
+                {done ? "برگشت ست" : "ثبت ست"}
+              </button>
+            </div>
           )
         })}
         {exercise.sets.length === 0 && <p className="text-sm text-mist">تعداد ست نوشته نشده و ستی ساخته نشده است.</p>}
       </div>
+      {exercise.rest_seconds ? <RestTimer seconds={exercise.rest_seconds} /> : null}
     </div>
   )
 }
@@ -159,11 +248,16 @@ export function CalendarView({
 }) {
   return (
     <div>
-      <div className="mt-4 grid grid-cols-4 gap-2">
+      <div className="mt-4 grid grid-cols-7 gap-1 text-center text-xs text-mist">
+        {["د", "س", "چ", "پ", "ج", "ش", "ی"].map((name) => (
+          <span key={name}>{name}</span>
+        ))}
+      </div>
+      <div className="mt-2 grid grid-cols-7 gap-1">
         {days.map((item) => (
-          <button key={item.day} className={`min-h-16 rounded-2xl p-2 text-right ${item.day === shown ? "bg-mint text-ink" : "bg-card"}`} onClick={() => onSelect(item.day)}>
-            <span className="block text-sm">{item.day.slice(8)}</span>
-            <span className="text-xs">{item.label}</span>
+          <button key={item.day} title={item.label || item.day} className={`flex min-h-12 flex-col items-center justify-center rounded-xl px-0.5 py-1 text-center text-[11px] leading-tight ${item.day === shown ? "bg-mint font-bold text-ink" : "bg-card"}`} onClick={() => onSelect(item.day)}>
+            <span>{item.day.slice(8)}</span>
+            <span className="max-w-full truncate">{item.label}</span>
           </button>
         ))}
       </div>
