@@ -8,7 +8,12 @@ import {
   monthCells,
   nutritionRollup,
   restRemaining,
+  shamsiDateLabel,
+  shamsiMonthLabel,
+  shiftJalaliMonth,
   summarize,
+  toJalali,
+  fromJalali,
   type Activity,
   type FitnessEvent,
 } from "./logic"
@@ -200,12 +205,31 @@ describe("completion replay", () => {
     expect(restRemaining(1_000, 90, 200_000)).toBe(0)
   })
 
-  it("starts the month grid on Monday", () => {
-    const cells = monthCells("2026-10-16")
+  it("shows a Saturday-first Shamsi month without changing the stored date", () => {
+    expect(toJalali("2026-03-21")).toEqual({ year: 1405, month: 1, day: 1 })
+    expect(toJalali("2026-10-17")).toEqual({ year: 1405, month: 7, day: 25 })
+    expect(fromJalali(1405, 7, 25)).toBe("2026-10-17")
+    expect(shamsiMonthLabel("2026-10-17")).toBe("مهر ۱۴۰۵")
+    expect(shamsiDateLabel("2026-10-17")).toBe("۲۵ مهر ۱۴۰۵")
+    expect(shiftJalaliMonth("2026-10-17", 1)).toBe("2026-10-23")
+    expect(shiftJalaliMonth("2026-10-17", -1)).toBe("2026-08-23")
+    const cells = monthCells("2026-10-17")
     expect(cells).toHaveLength(42)
-    expect(cells[0].date).toBe("2026-09-28")
-    expect(cells.find((cell) => cell.date === "2026-10-01")?.inMonth).toBe(true)
+    expect(new Date(`${cells[0].date}T12:00:00Z`).getUTCDay()).toBe(6)
     expect(cells[0].inMonth).toBe(false)
+    const first = cells.find((cell) => cell.inMonth)
+    expect(first).toMatchObject({ date: "2026-09-23", day: 1, inMonth: true })
+    expect(cells.filter((cell) => cell.inMonth)).toHaveLength(30)
+    expect(cells.find((cell) => cell.date === "2026-10-17")).toMatchObject({ day: 25, inMonth: true })
+    const format = new Intl.DateTimeFormat("en-US-u-ca-persian-nu-latn", { timeZone: "UTC", year: "numeric", month: "numeric", day: "numeric" })
+    const cursor = new Date("2024-03-19T12:00:00Z")
+    for (let index = 0; index < 1100; index += 1) {
+      const iso = cursor.toISOString().slice(0, 10)
+      const parts = Object.fromEntries(format.formatToParts(cursor).map((part) => [part.type, part.value]))
+      expect(toJalali(iso)).toEqual({ year: Number(parts.year), month: Number(parts.month), day: Number(parts.day) })
+      expect(fromJalali(Number(parts.year), Number(parts.month), Number(parts.day))).toBe(iso)
+      cursor.setUTCDate(cursor.getUTCDate() + 1)
+    }
   })
 
   it("does not invent an image url when the plan or the media store has none", () => {

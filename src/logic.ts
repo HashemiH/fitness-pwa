@@ -225,17 +225,111 @@ export function nutritionRollup(rows: Annotated[]): MacroRollup {
   }
 }
 
-export function monthCells(anchor: string): { date: string; inMonth: boolean }[] {
-  const [year, month] = anchor.split("-").map(Number)
-  const first = new Date(Date.UTC(year, month - 1, 1))
-  const offset = (first.getUTCDay() + 6) % 7
+const JALALI_MONTHS = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"]
+
+function div(a: number, b: number): number {
+  return Math.trunc(a / b)
+}
+
+function mod(a: number, b: number): number {
+  return a - div(a, b) * b
+}
+
+function gregorianToJdn(year: number, month: number, day: number): number {
+  const value = div((year + div(month - 8, 6) + 100100) * 1461, 4) + div(153 * mod(month + 9, 12) + 2, 5) + day - 34840408
+  return value - div(div(year + 100100 + div(month - 8, 6), 100) * 3, 4) + 752
+}
+
+function jdnToGregorian(jdn: number): { year: number; month: number; day: number } {
+  let j = 4 * jdn + 139361631
+  j = j + div(div(4 * jdn + 183187720, 146097) * 3, 4) * 4 - 3908
+  const i = div(mod(j, 1461), 4) * 5 + 308
+  const day = div(mod(i, 153), 5) + 1
+  const month = mod(div(i, 153), 12) + 1
+  const year = div(j, 1461) - 100100 + div(8 - month, 6)
+  return { year, month, day }
+}
+
+function jalaliCalendar(year: number): { leap: number; gregorianYear: number; march: number } {
+  const breaks = [-61, 9, 38, 199, 426, 686, 756, 818, 1111, 1181, 1210, 1635, 2060, 2097, 2192, 2262, 2324, 2394, 2456, 3178]
+  const gregorianYear = year + 621
+  let leapJ = -14
+  let jp = breaks[0]
+  let jump = 0
+  if (year < jp || year >= breaks[breaks.length - 1]) throw new Error("سال شمسی خارج از بازه است")
+  for (let index = 1; index < breaks.length; index += 1) {
+    const jm = breaks[index]
+    jump = jm - jp
+    if (year < jm) break
+    leapJ = leapJ + div(jump, 33) * 8 + div(mod(jump, 33), 4)
+    jp = jm
+  }
+  let n = year - jp
+  leapJ = leapJ + div(n, 33) * 8 + div(mod(n, 33) + 3, 4)
+  if (mod(jump, 33) === 4 && jump - n === 4) leapJ += 1
+  const leapG = div(gregorianYear, 4) - div((div(gregorianYear, 100) + 1) * 3, 4) - 150
+  const march = 20 + leapJ - leapG
+  if (jump - n < 6) n = n - jump + div(jump + 4, 33) * 33
+  let leap = mod(mod(n + 1, 33) - 1, 4)
+  if (leap === -1) leap = 4
+  return { leap, gregorianYear, march }
+}
+
+function jalaliToJdn(year: number, month: number, day: number): number {
+  const calendar = jalaliCalendar(year)
+  return gregorianToJdn(calendar.gregorianYear, 3, calendar.march) + (month - 1) * 31 - div(month, 7) * (month - 7) + day - 1
+}
+
+export function toJalali(iso: string): { year: number; month: number; day: number } {
+  const [year, month, day] = iso.split("-").map(Number)
+  const jdn = gregorianToJdn(year, month, day)
+  let jalaliYear = year - 621
+  const calendar = jalaliCalendar(jalaliYear)
+  let dayOfYear = jdn - gregorianToJdn(calendar.gregorianYear, 3, calendar.march)
+  if (dayOfYear >= 0) {
+    if (dayOfYear <= 185) return { year: jalaliYear, month: 1 + div(dayOfYear, 31), day: mod(dayOfYear, 31) + 1 }
+    dayOfYear -= 186
+  } else {
+    jalaliYear -= 1
+    dayOfYear += 179
+    if (calendar.leap === 1) dayOfYear += 1
+  }
+  return { year: jalaliYear, month: 7 + div(dayOfYear, 30), day: mod(dayOfYear, 30) + 1 }
+}
+
+export function fromJalali(year: number, month: number, day: number): string {
+  const date = jdnToGregorian(jalaliToJdn(year, month, day))
+  return `${date.year}-${String(date.month).padStart(2, "0")}-${String(date.day).padStart(2, "0")}`
+}
+
+export function shiftJalaliMonth(iso: string, amount: number): string {
+  const current = toJalali(iso)
+  const index = current.year * 12 + (current.month - 1) + amount
+  return fromJalali(Math.floor(index / 12), (index % 12) + 1, 1)
+}
+
+export function shamsiMonthLabel(iso: string): string {
+  const { year, month } = toJalali(iso)
+  return `${JALALI_MONTHS[month - 1]} ${persianDigits(year)}`
+}
+
+export function shamsiDateLabel(iso: string): string {
+  const { year, month, day } = toJalali(iso)
+  return `${persianDigits(day)} ${JALALI_MONTHS[month - 1]} ${persianDigits(year)}`
+}
+
+export function monthCells(anchor: string): { date: string; inMonth: boolean; day: number }[] {
+  const { year, month } = toJalali(anchor)
+  const first = new Date(`${fromJalali(year, month, 1)}T12:00:00Z`)
+  const offset = (first.getUTCDay() + 1) % 7
   const gridStart = new Date(first)
-  gridStart.setUTCDate(1 - offset)
+  gridStart.setUTCDate(first.getUTCDate() - offset)
   return Array.from({ length: 42 }, (_, index) => {
-    const day = new Date(gridStart)
-    day.setUTCDate(gridStart.getUTCDate() + index)
-    const date = day.toISOString().slice(0, 10)
-    return { date, inMonth: day.getUTCMonth() === month - 1 }
+    const cell = new Date(gridStart)
+    cell.setUTCDate(gridStart.getUTCDate() + index)
+    const date = cell.toISOString().slice(0, 10)
+    const jalali = toJalali(date)
+    return { date, inMonth: jalali.year === year && jalali.month === month, day: jalali.day }
   })
 }
 
