@@ -2,6 +2,7 @@ import Dexie, { type EntityTable } from "dexie"
 import JSZip from "jszip"
 import { z } from "zod"
 import { eventPayload, type Activity, type FitnessEvent, type Operation } from "./logic"
+import { mergeProgram, type IncomingActivity } from "./programMerge"
 
 function blobFromBytes(bytes: Uint8Array): Blob {
   const copy = new Uint8Array(bytes.byteLength)
@@ -318,6 +319,78 @@ export async function restoreBackup(file: File, force: boolean): Promise<void> {
     if (mediaRows.length) await db.media.bulkAdd(mediaRows)
     if (plans[0]) await db.meta.put({ key: "active_plan", value: plans[0].key })
   })
+}
+
+export async function lanCredential(): Promise<{ endpoint: string; token: string; programHash: string; media: Record<string, string>; syncedIds: string[]; lastSync: string }> {
+  const read = async (key: string) => (await db.meta.get(key))?.value ?? ""
+  const mediaRaw = await read("lan_media_hashes")
+  const syncedRaw = await read("lan_synced_events")
+  return {
+    endpoint: await read("lan_endpoint"),
+    token: await read("lan_token"),
+    programHash: await read("lan_program_hash"),
+    media: mediaRaw ? JSON.parse(mediaRaw) as Record<string, string> : {},
+    syncedIds: syncedRaw ? JSON.parse(syncedRaw) as string[] : [],
+    lastSync: await read("lan_last_sync"),
+  }
+}
+
+export async function saveLanCredential(endpoint: string, token: string): Promise<void> {
+  await db.meta.put({ key: "lan_endpoint", value: endpoint })
+  await db.meta.put({ key: "lan_token", value: token })
+}
+
+export async function pendingLanEvents(): Promise<StoredEvent[]> {
+  const synced = new Set((await lanCredential()).syncedIds)
+  return (await db.events.toArray()).filter((event) => !synced.has(event.eventId))
+}
+
+export async function markLanSynced(ids: string[], programHash: string, media: Record<string, string>): Promise<void> {
+  const current = await lanCredential()
+  const synced = [...new Set([...current.syncedIds, ...ids])]
+  await db.meta.put({ key: "lan_synced_events", value: JSON.stringify(synced) })
+  await db.meta.put({ key: "lan_program_hash", value: programHash })
+  await db.meta.put({ key: "lan_media_hashes", value: JSON.stringify({ ...current.media, ...media }) })
+  await db.meta.put({ key: "lan_last_sync", value: new Date().toISOString() })
+}
+
+export async function applyLanProgram(delivery: { plan: { plan_id: string; version_id: string; title: string; timezone: string; start_date: string; end_date: string } | null; activities: IncomingActivity[] | null; media: { path: string; sha256: string; content_base64: string }[] }): Promise<string[]> {
+  if (!delivery.plan || !delivery.activities) return []
+  const files: { path: string; sha256: string; bytes: Uint8Array }[] = []
+  for (const item of delivery.media) {
+    const bytes = Uint8Array.from(atob(item.content_base64), (char) => char.charCodeAt(0))
+    const digest = await sha256(bytes)
+    if (digest !== item.sha256) throw new Error(`چک‌سام ${item.path} یکی نیست. چیزی ذخیره نشد.`)
+    files.push({ path: item.path, sha256: item.sha256, bytes })
+  }
+  const plan = delivery.plan
+  const key = `${plan.plan_id}/${plan.version_id}`
+  const current = await db.activities.where("planId").equals(plan.plan_id).and((row) => row.versionId === plan.version_id).toArray()
+  const events = await db.events.where("planId").equals(plan.plan_id).toArray()
+  const merged = mergeProgram(current, events, delivery.activities)
+  await db.transaction("rw", db.plans, db.activities, db.media, db.meta, async () => {
+    await db.plans.put({
+      key,
+      planId: plan.plan_id,
+      versionId: plan.version_id,
+      title: plan.title,
+      timezone: plan.timezone,
+      startDate: plan.start_date,
+      endDate: plan.end_date,
+      document: plan,
+    })
+    const keep = new Set(merged.activities.map((item) => item.activityId))
+    const existing = await db.activities.where("planId").equals(plan.plan_id).and((row) => row.versionId === plan.version_id).toArray()
+    for (const row of existing) {
+      if (!keep.has(row.activityId)) await db.activities.delete(row.activityId)
+    }
+    if (merged.activities.length) await db.activities.bulkPut(merged.activities)
+    for (const file of files) {
+      await db.media.put({ path: `${key}/${file.path}`, planKey: key, blob: blobFromBytes(file.bytes), mime: "application/octet-stream" })
+    }
+    await db.meta.put({ key: "active_plan", value: key })
+  })
+  return merged.conflicts.map((item) => item.activityId)
 }
 
 export async function requestPersistentStorage(): Promise<boolean | null> {

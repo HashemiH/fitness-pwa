@@ -23,7 +23,7 @@ function Shell() {
         </Routes>
         <nav className="nav" aria-label="اصلی">
           <Tab to="/" icon="home" label="امروز" />
-          <Tab to="/progress" icon="chart" label="پیشرفت" />
+          <Tab to="/nutrition" icon="meal" label="تغذیه" />
           <Tab to="/workout" icon="dumbbell" label="تمرین" />
           <Tab to="/calendar" icon="calendar" label="تقویم" />
           <Tab to="/more" icon="user" label="بیشتر" />
@@ -33,10 +33,10 @@ function Shell() {
   )
 }
 
-function Tab({ to, label, icon }: { to: string; label: string; icon: "home" | "chart" | "dumbbell" | "calendar" | "user" }) {
+function Tab({ to, label, icon }: { to: string; label: string; icon: "home" | "meal" | "dumbbell" | "calendar" | "user" }) {
   return (
     <NavLink to={to} end={to === "/"}>
-      <Icon name={icon} />
+      <Icon name={icon} filled />
       {label}
     </NavLink>
   )

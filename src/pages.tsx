@@ -1,18 +1,15 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
-import { Line, LineChart, ResponsiveContainer, XAxis, YAxis } from "recharts"
+import { ConnectPanel } from "./connectPanel"
 import { confirmPendingPlan, exportBackup, exportProgress, inspectPlanZip, requestPersistentStorage, restoreBackup, storageReport } from "./db"
 import { ConfirmationDialog, ErrorState, ImportPreview } from "./components"
 import { Icon } from "./icons"
-import { CLOCK, annotate, compareBySchedule, mediaUrl, monthCells, nutritionRollup, persianDigits, reduceStatus, restRemaining, shamsiDateLabel, shamsiMonthLabel, shiftJalaliMonth, summarize } from "./logic"
+import { CLOCK, annotate, compareBySchedule, mediaUrl, monthCells, nutritionRollup, persianDigits, reduceStatus, shamsiDateLabel, shamsiHeading, shamsiMonthLabel, shiftJalaliMonth, summarize, toJalali, type Activity, type FitnessEvent } from "./logic"
 import { useApp } from "./state"
 
-type Row = ReturnType<typeof annotate>[number]
+export { ProgressPage } from "./progress"
 
-function dayName(iso: string): string {
-  const date = new Date(`${iso}T12:00:00Z`)
-  return new Intl.DateTimeFormat("fa-IR-u-ca-gregory", { weekday: "long", day: "numeric", month: "long" }).format(date)
-}
+type Row = ReturnType<typeof annotate>[number]
 
 function shift(day: string, amount: number): string {
   const value = new Date(day + "T12:00:00Z")
@@ -20,17 +17,11 @@ function shift(day: string, amount: number): string {
   return value.toISOString().slice(0, 10)
 }
 
-function weekOf(day: string): string[] {
+function shamsiWeekOf(day: string): string[] {
   const date = new Date(day + "T12:00:00Z")
-  const offset = (date.getUTCDay() + 6) % 7
+  const offset = (date.getUTCDay() + 1) % 7
   const start = shift(day, -offset)
   return Array.from({ length: 7 }, (_, index) => shift(start, index))
-}
-
-function monthLast(day: string): string {
-  const [year, month] = day.split("-").map(Number)
-  const last = new Date(Date.UTC(year, month, 0)).getUTCDate()
-  return `${day.slice(0, 8)}${String(last).padStart(2, "0")}`
 }
 
 function askClock(current: string | null, apply: (clock: string) => void) {
@@ -40,14 +31,23 @@ function askClock(current: string | null, apply: (clock: string) => void) {
 
 function Ring({ percent }: { percent: number | null }) {
   const value = percent == null ? 0 : Math.max(0, Math.min(100, percent))
-  const length = 2 * Math.PI * 46
+  const length = 2 * Math.PI * 62
   return (
     <div className="ring" aria-label={percent == null ? "درصدی نیست" : `${percent} درصد`}>
-      <svg viewBox="0 0 120 120">
-        <circle cx="60" cy="60" r="46" fill="none" stroke="#293640" strokeWidth="10" />
-        {value > 0 ? <circle cx="60" cy="60" r="46" fill="none" stroke="#20E3A2" strokeWidth="10" strokeLinecap="round" strokeDasharray={`${(value / 100) * length} ${length}`} /> : null}
+      <svg viewBox="0 0 160 160" aria-hidden="true">
+        <circle className="track" cx="80" cy="80" r="62" />
+        {value > 0 ? <circle className="value" cx="80" cy="80" r="62" strokeDasharray={`${(value / 100) * length} ${length}`} /> : null}
       </svg>
-      <strong>{percent == null ? "—" : persianDigits(Math.round(percent)) + "٪"}</strong>
+      <strong>
+        <span dir="ltr">
+          {percent == null
+            ? "—"
+            :               [...persianDigits(Math.round(percent))].map((digit, index) => (
+                <em key={index} className={digit === "۰" ? "zero" : undefined}>{digit}</em>
+              ))}
+        </span>
+        {percent == null ? null : <small>٪</small>}
+      </strong>
     </div>
   )
 }
@@ -87,14 +87,11 @@ export function TodayPage() {
   const nextMeal = todayRows.find((row) => row.activity.kind === "meal" && row.status === "pending")
   const image = nextMeal ? mediaUrl(data.plan.key, nextMeal.activity.payload.image, data.media) : undefined
   return (
-    <section className="page">
+    <section className="page today-page">
       <header className="topbar">
-        <div className="tools">
-          <Link to="/nutrition" className="icon-btn" aria-label="جستجوی تغذیه"><Icon name="search" /></Link>
-        </div>
+        <div className="tools" />
         <div className="date-block">
-          <strong>{dayName(today)}</strong>
-          <span>{today}</span>
+          <strong>{shamsiHeading(today)}</strong>
         </div>
         <div className="tools end">
           <button className="icon-btn" aria-label="اعلان" onClick={() => setNotice(todayRows.filter((row) => row.status === "pending").length ? "فعالیت باز مانده است." : "اعلان بازی نیست.")}>
@@ -113,7 +110,7 @@ export function TodayPage() {
         <div className="shade">
           <header>
             <b>{nextMeal ? `بعدی: ${nextMeal.activity.title}` : "وعده بازی نمانده"}</b>
-            <span>{nextMeal?.scheduledTime ?? ""}</span>
+            <time>{nextMeal?.scheduledTime ?? ""}</time>
           </header>
           {nextMeal ? <Link to="/nutrition">مشاهده وعده</Link> : null}
         </div>
@@ -125,11 +122,11 @@ export function TodayPage() {
             <time>{row.scheduledTime ?? "—"}</time>
             <span className="rail" />
             <b>
-              {row.activity.title}
+              <span>{row.activity.title}</span>
               <button className="ghost" onClick={() => askClock(row.scheduledTime, (clock) => mark(row.activity, "reschedule", row.activity.activityId, clock))}>جابه‌جایی</button>
             </b>
             <button className="check" aria-label={row.status === "completed" ? "برگشت" : "انجام شد"} onClick={() => mark(row.activity, row.status === "completed" ? "undo" : "complete")}>
-              <i />
+              <i className={row.status === "completed" ? "on" : undefined}>{row.status === "completed" ? <Icon name="check" /> : null}</i>
             </button>
           </div>
         ))}
@@ -139,29 +136,35 @@ export function TodayPage() {
   )
 }
 
+const WEEKDAY_MARK = ["ی", "د", "س", "چ", "پ", "ج", "ش"]
+
 export function NutritionPage() {
   const { data, today, mark } = useApp()
   const [day, setDay] = useState(today)
-  const [query, setQuery] = useState("")
-  const [openSearch, setOpenSearch] = useState(false)
   if (!data?.plan) return <MissingPlan />
   const meals = annotate(
     data.activities.filter((item) => item.versionId === data.plan!.versionId && item.kind === "meal" && item.localDate === day),
     data.events,
     data.activities,
-  ).sort(compareBySchedule).filter((row) => row.activity.title.includes(query.trim()))
+  ).sort(compareBySchedule)
   return (
-    <section className="page">
+    <section className="page nutrition-page">
       <header className="back-head">
         <Link to="/" className="icon-btn" aria-label="بازگشت"><Icon name="back" /></Link>
         <h1>تغذیه</h1>
-        <button className="icon-btn" aria-label="جستجو" onClick={() => setOpenSearch((value) => !value)}><Icon name="search" /></button>
+        <span />
       </header>
-      {openSearch ? <input className="search" value={query} aria-label="جستجوی وعده" onChange={(event) => setQuery(event.target.value)} /> : null}
+      <p className="strip-month">{shamsiMonthLabel(day)}</p>
       <div className="day-strip">
-        {weekOf(day).map((item) => (
-          <button key={item} className={item === day ? "on" : ""} onClick={() => setDay(item)}>{persianDigits(Number(item.slice(8)))}</button>
-        ))}
+        {shamsiWeekOf(day).map((item) => {
+          const jalali = toJalali(item)
+          return (
+            <button key={item} className={item === day ? "on" : ""} aria-label={shamsiDateLabel(item)} onClick={() => setDay(item)}>
+              <small>{WEEKDAY_MARK[new Date(`${item}T12:00:00Z`).getUTCDay()]}</small>
+              <b>{persianDigits(jalali.day)}</b>
+            </button>
+          )
+        })}
       </div>
       <MacroStrip rows={meals} />
       {meals.map((meal) => {
@@ -171,19 +174,19 @@ export function NutritionPage() {
           <article key={meal.activity.activityId} className="meal-card">
             <div>
               <header>
-                <time>{meal.scheduledTime ?? "—"}</time>
                 <b>{meal.activity.title}</b>
+                <time>{meal.scheduledTime ? persianDigits(meal.scheduledTime) : "—"}</time>
               </header>
+              <p className="sub">{facts?.calories == null ? "کالری ثبت نشده" : `${persianDigits(facts.calories)} kcal`}</p>
               <ul>
                 {(meal.activity.payload.ingredients ?? []).map((item) => (
                   <li key={item.name}>{item.name}{item.quantity ? ` ${item.quantity}` : ""}</li>
                 ))}
                 {(meal.activity.payload.ingredients ?? []).length === 0 && <li>مواد در برنامه نیست.</li>}
               </ul>
-              <p className="sub">{facts?.calories == null ? "کالری ثبت نشده" : `${persianDigits(facts.calories)} kcal`}</p>
               <div className="actions">
-                <button onClick={() => mark(meal.activity, meal.status === "completed" ? "undo" : "complete")}>{meal.status === "completed" ? "برگشت" : "انجام"}</button>
-                <button onClick={() => mark(meal.activity, "skip")}>رد</button>
+                <button className={meal.status === "completed" ? "icon-act on" : "icon-act"} aria-label={meal.status === "completed" ? "برگشت" : "انجام"} onClick={() => mark(meal.activity, meal.status === "completed" ? "undo" : "complete")}><Icon name="check" /></button>
+                <button className={meal.status === "skipped" ? "icon-act skip on" : "icon-act"} aria-label="رد" onClick={() => mark(meal.activity, "skip")}><Icon name="x" /></button>
                 <button onClick={() => askClock(meal.scheduledTime, (clock) => mark(meal.activity, "reschedule", meal.activity.activityId, clock))}>ساعت</button>
               </div>
             </div>
@@ -204,99 +207,276 @@ function numeric(value: string | null | undefined): number | null {
   return Number.isFinite(number) ? number : null
 }
 
+function latinClock(value: string): string {
+  return value
+    .replace(/[۰-۹]/g, (digit) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit)))
+    .replace(/[٠-٩]/g, (digit) => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit)))
+    .replace(/\D/g, "")
+}
+
+function holdParts(total: number): { minutes: number; seconds: number } {
+  const safe = Math.max(0, Math.min(300 * 60, Math.floor(total)))
+  return { minutes: Math.floor(safe / 60), seconds: safe % 60 }
+}
+
+function formatHold(total: number): string {
+  const { minutes, seconds } = holdParts(total)
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+}
+
+function loggedSets(events: FitnessEvent[], activityId: string, exerciseId: string, planned: Map<string, number>) {
+  const prefix = `${activityId}/set/${exerciseId}/`
+  const ids = [...new Set(events.map((event) => event.targetId).filter((id) => id.startsWith(prefix)))]
+  const rows = ids.flatMap((id) => {
+    const related = events.filter((event) => event.targetId === id)
+    if (reduceStatus(related) !== "completed") return []
+    const ordered = [...related].sort((a, b) => (a.occurredAt + a.eventId).localeCompare(b.occurredAt + b.eventId))
+    let reps: string | null = null
+    let duration: string | null = null
+    for (const event of ordered) {
+      if (event.operation === "complete") {
+        reps = event.payload?.reps?.trim() || null
+        duration = event.payload?.duration?.trim() || null
+      }
+      if (event.operation === "undo") {
+        reps = null
+        duration = null
+      }
+    }
+    const parsed = Number(id.slice(prefix.length))
+    return [{ id, number: planned.get(id) ?? (Number.isFinite(parsed) ? parsed : 0), reps, duration }]
+  })
+  return rows.sort((a, b) => a.number - b.number || a.id.localeCompare(b.id))
+}
+
+const DAY_SLOTS = [
+  { key: "morning", title: "صبح" },
+  { key: "noon", title: "ظهر" },
+  { key: "gym", title: "باشگاه" },
+  { key: "night", title: "شب" },
+] as const
+
+function mealSlot(title: string): (typeof DAY_SLOTS)[number]["key"] | null {
+  if (/قبل\s*تمرین|باشگاه/.test(title)) return "gym"
+  if (/شام|خواب|بعد\s*تمرین|(^|[\s/])شب/.test(title)) return "night"
+  if (/ناهار|ظهر|عصر/.test(title)) return "noon"
+  if (/صبح|ناشتا/.test(title)) return "morning"
+  return null
+}
+
+function movementGroups(activities: Activity[], events: FitnessEvent[]) {
+  const rows = annotate(activities, events, activities).sort(compareBySchedule)
+  const meals = rows.filter((row) => row.activity.kind === "meal")
+  const workouts = rows.filter((row) => row.activity.kind === "workout")
+  const groups = DAY_SLOTS.map((slot) => ({
+    key: slot.key,
+    title: slot.title,
+    time: null as string | null,
+    items: [] as { session: Activity; exercise: NonNullable<Activity["payload"]["exercises"]>[number]; sessionTime: string | null }[],
+  }))
+  const slotOf = (key: (typeof DAY_SLOTS)[number]["key"]) => groups.findIndex((group) => group.key === key)
+  for (const row of workouts) {
+    const clock = row.scheduledTime ?? "99:99"
+    let slot: (typeof DAY_SLOTS)[number]["key"] | null = null
+    for (const meal of meals) {
+      const key = mealSlot(meal.activity.title)
+      if (key && (meal.scheduledTime ?? "99:99") <= clock) slot = key
+    }
+    if (!slot) {
+      const hour = Number(clock.slice(0, 2))
+      slot = Number.isFinite(hour) ? (hour < 12 ? "morning" : hour < 17 ? "noon" : hour < 21 ? "gym" : "night") : "gym"
+    }
+    for (const exercise of row.activity.payload.exercises ?? []) {
+      groups[slotOf(slot)].items.push({ session: row.activity, exercise, sessionTime: row.scheduledTime })
+    }
+  }
+  return groups
+}
+
 export function WorkoutPage() {
   const { data, today, mark } = useApp()
   const [mode, setMode] = useState<"day" | "all">("day")
   const [picked, setPicked] = useState(0)
-  const [startedAt, setStartedAt] = useState<number | null>(null)
-  const [now, setNow] = useState(() => Date.now())
-  const [drafts, setDrafts] = useState<Record<string, { weight: string; reps: string }>>({})
-  useEffect(() => {
-    if (startedAt == null) return
-    const tick = () => setNow(Date.now())
-    const timer = window.setInterval(tick, 250)
-    document.addEventListener("visibilitychange", tick)
-    return () => {
-      window.clearInterval(timer)
-      document.removeEventListener("visibilitychange", tick)
-    }
-  }, [startedAt])
+  const [drafts, setDrafts] = useState<Record<string, { reps: string; minutes: string; seconds: string }>>({})
+  const [slot, setSlot] = useState<(typeof DAY_SLOTS)[number]["key"] | null>(null)
   if (!data?.plan) return <MissingPlan />
   const sessions = data.activities.filter((item) => item.versionId === data.plan!.versionId && item.kind === "workout" && item.localDate === today)
   const exercises = sessions.flatMap((session) => (session.payload.exercises ?? []).map((exercise) => ({ session, exercise })))
+  const groups = movementGroups(
+    data.activities.filter((item) => item.versionId === data.plan!.versionId && item.localDate === today && item.kind !== "rest"),
+    data.events ?? [],
+  )
+  const activeSlot = slot ?? groups.find((group) => group.items.length)?.key ?? "gym"
+  const activeGroup = groups.find((group) => group.key === activeSlot) ?? groups[0]
   const current = exercises[Math.min(picked, Math.max(exercises.length - 1, 0))]
+  const inSlot = Boolean(current && activeGroup.items.some((item) => item.session.activityId === current.session.activityId && item.exercise.exercise_id === current.exercise.exercise_id))
+  function chooseSlot(key: (typeof DAY_SLOTS)[number]["key"]) {
+    setSlot(key)
+    const first = groups.find((group) => group.key === key)?.items[0]
+    if (!first) return
+    const index = exercises.findIndex((entry) => entry.session.activityId === first.session.activityId && entry.exercise.exercise_id === first.exercise.exercise_id)
+    if (index >= 0) setPicked(index)
+  }
   const exercise = current?.exercise
-  const setIndex = exercise
-    ? exercise.sets.findIndex((item) => reduceStatus((data.events ?? []).filter((event) => event.targetId === item.set_id)) !== "completed")
-    : -1
-  const activeSet = exercise && setIndex >= 0 ? exercise.sets[setIndex] : exercise?.sets.at(-1)
-  const draft = activeSet ? drafts[activeSet.set_id] ?? { weight: activeSet.weight ?? "", reps: activeSet.reps ?? "" } : { weight: "", reps: "" }
-  const restSeconds = exercise?.rest_seconds ?? 0
-  const left = startedAt == null || !restSeconds ? restSeconds : restRemaining(startedAt, restSeconds, now)
-  const clock = `${String(Math.floor(left / 60)).padStart(2, "0")}:${String(left % 60).padStart(2, "0")}`
+  const planned = new Map(exercise?.sets.map((item) => [item.set_id, item.number]) ?? [])
+  const logs = exercise && current ? loggedSets(data.events ?? [], current.session.activityId, exercise.exercise_id, planned) : []
+  const pending = exercise?.sets.find((item) => reduceStatus((data.events ?? []).filter((event) => event.targetId === item.set_id)) !== "completed")
+  const nextNumber = pending ? pending.number : Math.max(exercise?.sets.length ?? 0, ...logs.map((item) => item.number), 0) + 1
+  const nextId = pending?.set_id ?? (current && exercise ? `${current.session.activityId}/set/${exercise.exercise_id}/${nextNumber}` : "")
+  const beyond = Boolean(exercise && exercise.sets.length > 0 && !pending)
+  const draft = nextId
+    ? drafts[nextId] ?? {
+        reps: pending?.reps ?? exercise?.sets.at(-1)?.reps ?? "",
+        minutes: exercise?.duration_minutes != null ? String(exercise.duration_minutes) : "0",
+        seconds: "0",
+      }
+    : { reps: "", minutes: "0", seconds: "0" }
+  const manualSeconds = Math.min(300 * 60, (numeric(draft.minutes) ?? 0) * 60 + Math.min(59, numeric(draft.seconds) ?? 0))
   const image = exercise ? mediaUrl(data.plan.key, exercise.image, data.media) : undefined
+  function writeTime(part: "minutes" | "seconds", raw: string) {
+    const digits = latinClock(raw).slice(0, part === "seconds" ? 2 : 3)
+    const next = { ...draft, [part]: digits === "" ? "0" : String(Number(digits)) }
+    if (part === "seconds" && Number(next.seconds) > 59) next.seconds = "59"
+    if (part === "minutes" && Number(next.minutes) > 300) next.minutes = "300"
+    setDrafts((currentDrafts) => ({ ...currentDrafts, [nextId]: next }))
+  }
   return (
     <section className="page">
       <div className="segment">
         <button className={mode === "all" ? "on" : ""} onClick={() => setMode("all")}>همه حرکات</button>
         <button className={mode === "day" ? "on" : ""} onClick={() => setMode("day")}>روز تمرین</button>
       </div>
-      {!current ? <p className="empty">برای این حالت تمرینی نیست.</p> : mode === "day" ? (
+      {mode === "day" ? (
         <>
+          <div className="slot-pick" role="group" aria-label="وعده تمرین">
+            {DAY_SLOTS.map((item) => (
+              <button key={item.key} className={activeSlot === item.key ? "on" : ""} onClick={() => chooseSlot(item.key)}>{item.title}</button>
+            ))}
+          </div>
+          {!current || !inSlot ? <p className="empty">برای {activeGroup.title} حرکتی در برنامه نیست.</p> : (
+          <>
           <div className="hero-media"><Picture src={image} label="تصویر این حرکت در برنامه نیست" /></div>
           <div className="player-card">
             <h2>{exercise?.name}</h2>
-            <p className="meta">{exercise ? `ست ${persianDigits((setIndex >= 0 ? setIndex : exercise.sets.length - 1) + 1)} از ${persianDigits(exercise.sets.length)}` : ""}</p>
-            {activeSet ? (
-              <div className="steppers">
-                <div className="stepper">
-                  <button aria-label="کم کردن وزن" onClick={() => setDrafts((currentDrafts) => ({ ...currentDrafts, [activeSet.set_id]: { ...draft, weight: String(Math.max(0, (numeric(draft.weight) ?? 0) - 1)) } }))}>−</button>
-                  <b>{draft.weight.trim() ? persianDigits(draft.weight) : "—"}</b>
-                  <button aria-label="زیاد کردن وزن" onClick={() => setDrafts((currentDrafts) => ({ ...currentDrafts, [activeSet.set_id]: { ...draft, weight: String((numeric(draft.weight) ?? 0) + 1) } }))}>+</button>
+            <p className="meta">{exercise ? beyond || exercise.sets.length === 0 ? `ست ${persianDigits(nextNumber)} · بیشتر از برنامه` : `ست ${persianDigits(nextNumber)} از ${persianDigits(exercise.sets.length)}` : ""}</p>
+            {exercise && nextId ? (
+              <>
+                <div className="steppers one">
+                  <div className="stepper">
+                    <button aria-label="کم کردن تکرار" onClick={() => setDrafts((currentDrafts) => ({ ...currentDrafts, [nextId]: { ...draft, reps: String(Math.max(0, (numeric(draft.reps) ?? 0) - 1)) } }))}>−</button>
+                    <b>{draft.reps.trim() ? persianDigits(draft.reps) : "—"}<small>تکرار</small></b>
+                    <button aria-label="زیاد کردن تکرار" onClick={() => setDrafts((currentDrafts) => ({ ...currentDrafts, [nextId]: { ...draft, reps: String((numeric(draft.reps) ?? 0) + 1) } }))}>+</button>
+                  </div>
                 </div>
-                <div className="stepper">
-                  <button aria-label="کم کردن تکرار" onClick={() => setDrafts((currentDrafts) => ({ ...currentDrafts, [activeSet.set_id]: { ...draft, reps: String(Math.max(0, (numeric(draft.reps) ?? 0) - 1)) } }))}>−</button>
-                  <b>{draft.reps.trim() ? persianDigits(draft.reps) : "—"}</b>
-                  <button aria-label="زیاد کردن تکرار" onClick={() => setDrafts((currentDrafts) => ({ ...currentDrafts, [activeSet.set_id]: { ...draft, reps: String((numeric(draft.reps) ?? 0) + 1) } }))}>+</button>
+                <div className="steppers">
+                  <label className="time-field">
+                    <input
+                      inputMode="numeric"
+                      aria-label="دقیقه"
+                      value={persianDigits(draft.minutes)}
+                      onChange={(event) => writeTime("minutes", event.target.value)}
+                    />
+                    <small>دقیقه</small>
+                  </label>
+                  <label className="time-field">
+                    <input
+                      inputMode="numeric"
+                      aria-label="ثانیه"
+                      value={persianDigits(draft.seconds)}
+                      onChange={(event) => writeTime("seconds", event.target.value)}
+                    />
+                    <small>ثانیه</small>
+                  </label>
                 </div>
-              </div>
+              </>
             ) : <p className="meta">ستی در برنامه نیست.</p>}
             <button
               className="primary"
-              disabled={!activeSet || !current || setIndex < 0}
+              disabled={!current || !exercise || !nextId}
               onClick={() => {
-                if (!activeSet || !current) return
+                if (!current || !nextId) return
                 const extra: Record<string, string> = {}
-                if (draft.weight.trim() && draft.weight.trim() !== "—") extra.weight = draft.weight.trim()
                 if (draft.reps.trim() && draft.reps.trim() !== "—") extra.reps = draft.reps.trim()
-                void mark(current.session, "complete", activeSet.set_id, null, extra)
-                if (restSeconds) setStartedAt(Date.now())
+                if (manualSeconds > 0) extra.duration = formatHold(manualSeconds)
+                void mark(current.session, "complete", nextId, null, extra)
               }}
             >
               ثبت ست
             </button>
-          </div>
-          {restSeconds ? (
-            <div className="rest">
-              <button aria-label="شروع استراحت" onClick={() => setStartedAt(Date.now())}>{startedAt == null ? "▶" : "❚❚"}</button>
-              <strong aria-live="polite">{persianDigits(clock)}</strong>
-              <span>استراحت</span>
+            <div className="set-log">
+              <p>ست‌های امروز</p>
+              {logs.length === 0 ? <span>هنوز ستی ثبت نشده.</span> : (
+                <ul>
+                  {logs.map((item) => (
+                    <li key={item.id}>
+                      <span>
+                        ست {persianDigits(item.number)}
+                        {item.reps ? ` · ${persianDigits(item.reps)} تکرار` : ""}
+                        {item.duration && item.duration !== "00:00" ? ` · ${persianDigits(item.duration)}` : ""}
+                        {item.number > (exercise?.sets.length ?? 0) ? " · بیشتر از برنامه" : ""}
+                      </span>
+                      <button aria-label={`حذف ست ${persianDigits(item.number)}`} onClick={() => { if (current) void mark(current.session, "undo", item.id) }}><Icon name="x" /></button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
-          ) : null}
+          </div>
+          </>
+          )}
         </>
       ) : null}
+      {mode === "all" ? (
+        <div className="ex-groups">
+          {groups.map((group) => (
+            <section key={group.key} className="ex-group">
+              <h3>
+                <b>{group.title}</b>
+                {group.time ? <time>{persianDigits(group.time)}</time> : null}
+              </h3>
+              {group.items.length === 0 ? <p>حرکتی در این وعده نیست.</p> : (
+                <div className="ex-list">
+                  {group.items.map((item, index) => {
+                    const thumb = mediaUrl(data.plan!.key, item.exercise.image, data.media)
+                    const flat = exercises.findIndex((entry) => entry.session.activityId === item.session.activityId && entry.exercise.exercise_id === item.exercise.exercise_id)
+                    const previous = group.items[index - 1]
+                    const done = loggedSets(data.events ?? [], item.session.activityId, item.exercise.exercise_id, new Map(item.exercise.sets.map((set) => [set.set_id, set.number])))
+                    return (
+                      <div key={item.exercise.exercise_id + item.session.activityId}>
+                        {!previous || previous.session.activityId !== item.session.activityId ? (
+                          <p className="ex-session">{item.session.title}{item.sessionTime ? ` · ${persianDigits(item.sessionTime)}` : ""}</p>
+                        ) : null}
+                        <button className={flat === picked ? "on" : ""} onClick={() => { setPicked(Math.max(flat, 0)); setSlot(group.key); setMode("day") }}>
+                          <Picture src={thumb} label="—" />
+                          <span>{item.exercise.name}</span>
+                          <small>{done.length ? `${persianDigits(done.length)} انجام` : `${persianDigits(item.exercise.sets.length)} ست`}</small>
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </section>
+          ))}
+        </div>
+      ) : activeGroup.items.length ? (
       <div className="ex-list">
-        {exercises.map((item, index) => {
+        {activeGroup.items.map((item) => {
           const thumb = mediaUrl(data.plan!.key, item.exercise.image, data.media)
+          const index = exercises.findIndex((entry) => entry.session.activityId === item.session.activityId && entry.exercise.exercise_id === item.exercise.exercise_id)
           return (
             <button key={item.exercise.exercise_id + item.session.activityId} className={index === picked ? "on" : ""} onClick={() => { setPicked(index); setMode("day") }}>
               <Picture src={thumb} label="—" />
               <span>{item.exercise.name}</span>
-              <small>{persianDigits(item.exercise.sets.length)} ست</small>
+              <small>{(() => {
+                const done = loggedSets(data.events ?? [], item.session.activityId, item.exercise.exercise_id, new Map(item.exercise.sets.map((set) => [set.set_id, set.number])))
+                return done.length ? `${persianDigits(done.length)} انجام` : `${persianDigits(item.exercise.sets.length)} ست`
+              })()}</small>
             </button>
           )
         })}
       </div>
+      ) : null}
     </section>
   )
 }
@@ -314,9 +494,9 @@ export function CalendarPage() {
   return (
     <section className="page">
       <header className="month-head">
-        <button aria-label="ماه بعد" onClick={() => setCursor(shiftJalaliMonth(cursor, 1))}>‹</button>
+        <button aria-label="ماه بعد" onClick={() => setCursor(shiftJalaliMonth(cursor, 1))}><Icon name="back" /></button>
         <h1>{shamsiMonthLabel(cursor)}</h1>
-        <button aria-label="ماه قبل" onClick={() => setCursor(shiftJalaliMonth(cursor, -1))}>›</button>
+        <button aria-label="ماه قبل" onClick={() => setCursor(shiftJalaliMonth(cursor, -1))}><Icon name="back" /></button>
       </header>
       <div className="cal">
         {SHAMSI_WEEKDAYS.map((name) => <span key={name} className="dow">{name}</span>)}
@@ -336,66 +516,18 @@ export function CalendarPage() {
         })}
       </div>
       <p className="legend"><i className="meal" />تغذیه <i className="workout" />تمرین <i className="rest" />استراحت <span>وزن ثبت نمی‌شود</span></p>
-      <h2 className="section-label">جزئیات {shamsiDateLabel(selected)}</h2>
+      <h2 className="section-label day-title">جزئیات {shamsiDateLabel(selected)}</h2>
       {detail.map((row) => (
         <div key={row.activity.activityId} className="line">
           <span className="kind">{row.activity.kind === "workout" ? "ت" : row.activity.kind === "rest" ? "ا" : "غ"}</span>
           <b>{row.activity.title}</b>
           <time>{row.scheduledTime ?? "—"}</time>
           <button className="check" aria-label="وضعیت" onClick={() => row.activity.kind !== "rest" && mark(row.activity, row.status === "completed" ? "undo" : "complete")}>
-            <i style={row.status === "completed" ? { background: "#20E3A2", borderColor: "#20E3A2" } : undefined} />
+            <i className={row.status === "completed" ? "on" : undefined}>{row.status === "completed" ? <Icon name="check" /> : null}</i>
           </button>
         </div>
       ))}
       {detail.length === 0 && <p className="empty">برای این روز فعالیتی نیست.</p>}
-    </section>
-  )
-}
-
-export function ProgressPage() {
-  const { data, today } = useApp()
-  const [span, setSpan] = useState<"week" | "month" | "year">("week")
-  if (!data?.plan) return <MissingPlan />
-  const rows = annotate(data.activities.filter((item) => item.versionId === data.plan!.versionId), data.events, data.activities)
-  const start = span === "week" ? weekOf(today)[0] : span === "month" ? today.slice(0, 8) + "01" : today.slice(0, 4) + "-01-01"
-  const end = span === "week" ? shift(start, 6) : span === "month" ? monthLast(today) : today.slice(0, 4) + "-12-31"
-  const length = span === "week" ? 7 : span === "month" ? Number(end.slice(8)) : 12
-  const chart = Array.from({ length }, (_, index) => {
-    const day = span === "year" ? `${today.slice(0, 4)}-${String(index + 1).padStart(2, "0")}-01` : shift(start, index)
-    const until = span === "year" ? monthLast(day) : day
-    const summary = summarize(rows, day, until)
-    return { day: span === "year" ? persianDigits(index + 1) : persianDigits(Number(day.slice(8))), percent: summary.percent }
-  })
-  const summary = summarize(rows, start, end)
-  const hasPoints = chart.some((item) => item.percent != null)
-  return (
-    <section className="page">
-      <div className="periods">
-        <button className={span === "year" ? "on" : ""} onClick={() => setSpan("year")}>سالانه</button>
-        <button className={span === "month" ? "on" : ""} onClick={() => setSpan("month")}>ماهانه</button>
-        <button className={span === "week" ? "on" : ""} onClick={() => setSpan("week")}>هفتگی</button>
-      </div>
-      <div className="chart-card">
-        {hasPoints ? (
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chart}>
-              <XAxis dataKey="day" stroke="#98A7B2" tick={{ fontSize: 10 }} />
-              <YAxis hide domain={[0, 100]} />
-              <Line type="monotone" dataKey="percent" stroke="#20E3A2" strokeWidth={2} dot={{ r: 2 }} connectNulls={false} />
-            </LineChart>
-          </ResponsiveContainer>
-        ) : <p>برای این بازه فعالیتی جهت نمودار نیست.</p>}
-      </div>
-      <p className="note">نمودار درصد تکمیل است، نه وزن. {summary.percent == null ? "درصدی نیست." : `${persianDigits(summary.percent)}٪`}</p>
-      <div className="measures">
-        {["وزن", "دور کمر", "دور بازو", "چربی بدن"].map((label) => (
-          <article key={label} className="measure"><small>{label}</small><b>ثبت نشده</b></article>
-        ))}
-      </div>
-      <section className="photo">
-        <h2>عکس‌های پیشرفت</h2>
-        <div className="photo-slot">افزودن عکس<br />هنوز عکسی نیست</div>
-      </section>
     </section>
   )
 }
@@ -407,7 +539,7 @@ export function MorePage() {
   const [preview, setPreview] = useState<{ title: string; start: string; end: string; meals: number; workouts: number; images: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [restoreFile, setRestoreFile] = useState<File | null>(null)
-  const [panel, setPanel] = useState<"plan" | "file" | "backup" | "settings" | null>(null)
+  const [panel, setPanel] = useState<"plan" | "file" | "backup" | "settings" | "connect" | null>(null)
   const [storage, setStorage] = useState("وضعیت نگهداری دائمی هنوز پرسیده نشده است.")
   const [diag, setDiag] = useState("در حال خواندن وضعیت حافظه...")
   const [farewell, setFarewell] = useState<string | null>(null)
@@ -442,22 +574,24 @@ export function MorePage() {
   return (
     <section className="page">
       <article className="plan-card">
-        <div className="mark" aria-hidden="true">F</div>
+        <img className="mark" src={`${import.meta.env.BASE_URL}icon-192.png`} alt="" />
         <div>
           <h1>{data?.plan?.title ?? "برنامه‌ای فعال نیست"}</h1>
-          <p>{data?.plan ? `${data.plan.startDate} تا ${data.plan.endDate}` : "از ورود برنامه یک بسته ZIP بیاورید."}</p>
+          <p>{data?.plan ? `${shamsiDateLabel(data.plan.startDate)} تا ${shamsiDateLabel(data.plan.endDate)}` : "از ورود برنامه یک بسته ZIP بیاورید."}</p>
           <p>{data?.plan ? <em>فعال{counts ? ` | ${persianDigits(counts.workouts)} تمرین | ${persianDigits(counts.meals)} وعده` : ""}</em> : null}</p>
         </div>
       </article>
       <div className="menu">
-        <button className="menu-row" onClick={() => setPanel(panel === "plan" ? null : "plan")}><Icon name="calendar" />بررسی برنامه</button>
-        <label className="menu-row">ورود برنامه جدید<input className="hidden-input" type="file" accept=".zip,application/zip" onChange={(event) => onPlan(event.target.files?.[0])} /></label>
-        <button className="menu-row" onClick={() => void download("progress.json", exportProgress())}><Icon name="chart" />تبادل فایل</button>
-        <button className="menu-row" onClick={() => navigate("/progress")}><Icon name="chart" />گزارش‌ها</button>
-        <button className="menu-row" onClick={() => setPanel(panel === "settings" ? null : "settings")}><Icon name="user" />تنظیمات</button>
-        <button className="menu-row" onClick={() => setPanel(panel === "backup" ? null : "backup")}><Icon name="bell" />پشتیبان‌گیری</button>
-        <button className="menu-row danger" onClick={() => setFarewell("حساب کاربری وجود ندارد. داده‌ها روی همین دستگاه می‌مانند و پاک نمی‌شوند.")}>خروج</button>
+        <button className={panel === "plan" ? "menu-row on" : "menu-row"} onClick={() => setPanel(panel === "plan" ? null : "plan")}><Icon name="doc" />بررسی برنامه</button>
+        <label className={panel === "file" || preview ? "menu-row on" : "menu-row"}><Icon name="download" />ورود برنامه جدید<input className="hidden-input" type="file" accept=".zip,application/zip" onChange={(event) => onPlan(event.target.files?.[0])} /></label>
+        <button className="menu-row" onClick={() => void download("progress.json", exportProgress())}><Icon name="swap" />تبادل فایل</button>
+        <button className={panel === "connect" ? "menu-row on" : "menu-row"} onClick={() => setPanel(panel === "connect" ? null : "connect")}><Icon name="swap" />اتصال برنامه</button>
+        <button className="menu-row" onClick={() => navigate("/progress")}><Icon name="bars" />گزارش‌ها</button>
+        <button className={panel === "settings" ? "menu-row on" : "menu-row"} onClick={() => setPanel(panel === "settings" ? null : "settings")}><Icon name="gear" />تنظیمات</button>
+        <button className={panel === "backup" ? "menu-row on" : "menu-row"} onClick={() => setPanel(panel === "backup" ? null : "backup")}><Icon name="cloud" />پشتیبان‌گیری</button>
+        <button className="menu-row danger" onClick={() => setFarewell("حساب کاربری وجود ندارد. داده‌ها روی همین دستگاه می‌مانند و پاک نمی‌شوند.")}><Icon name="power" />خروج</button>
       </div>
+      {panel === "connect" ? <ConnectPanel /> : null}
       {panel === "plan" ? <p className="note">{message}</p> : null}
       {panel === "file" || preview ? (
         <div className="panel">
@@ -493,7 +627,7 @@ export function MorePage() {
           }}>درخواست نگهداری داده</button>
           <p className="note">{storage}</p>
           <p className="note">{diag}</p>
-          <p className="note">نسخه ۲.۰.۰. همگام‌سازی شبکه‌ای در این نسخه نیست و مسیر فایل ZIP سر جایش است.</p>
+          <p className="note">نسخه ۲.۰.۰. همگام‌سازی روی وای‌فای از اتصال برنامه است. ورود ZIP همچنان پشتیبان است. وقتی برنامه بسته است، همگام‌سازی پس‌زمینه تضمین نمی‌شود.</p>
         </div>
       ) : null}
       {farewell ? <p className="note">{farewell}</p> : null}

@@ -37,7 +37,7 @@ export type FitnessEvent = {
   status?: ActivityStatus
   occurredAt: string
   notes?: string | null
-  payload?: { scheduled_time?: string | null; weight?: string | null; reps?: string | null } | null
+  payload?: { scheduled_time?: string | null; weight?: string | null; reps?: string | null; duration?: string | null } | null
 }
 
 export const CLOCK = /^([01]\d|2[0-3]):[0-5]\d$/
@@ -313,9 +313,16 @@ export function shamsiMonthLabel(iso: string): string {
   return `${JALALI_MONTHS[month - 1]} ${persianDigits(year)}`
 }
 
+const WEEKDAY_NAMES = ["یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه", "شنبه"]
+
 export function shamsiDateLabel(iso: string): string {
   const { year, month, day } = toJalali(iso)
   return `${persianDigits(day)} ${JALALI_MONTHS[month - 1]} ${persianDigits(year)}`
+}
+
+export function shamsiHeading(iso: string): string {
+  const weekday = WEEKDAY_NAMES[new Date(`${iso}T12:00:00Z`).getUTCDay()]
+  return `${weekday} ${shamsiDateLabel(iso)}`
 }
 
 export function monthCells(anchor: string): { date: string; inMonth: boolean; day: number }[] {

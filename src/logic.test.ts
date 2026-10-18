@@ -9,6 +9,7 @@ import {
   nutritionRollup,
   restRemaining,
   shamsiDateLabel,
+  shamsiHeading,
   shamsiMonthLabel,
   shiftJalaliMonth,
   summarize,
@@ -211,6 +212,7 @@ describe("completion replay", () => {
     expect(fromJalali(1405, 7, 25)).toBe("2026-10-17")
     expect(shamsiMonthLabel("2026-10-17")).toBe("مهر ۱۴۰۵")
     expect(shamsiDateLabel("2026-10-17")).toBe("۲۵ مهر ۱۴۰۵")
+    expect(shamsiHeading("2026-10-17")).toBe("شنبه ۲۵ مهر ۱۴۰۵")
     expect(shiftJalaliMonth("2026-10-17", 1)).toBe("2026-10-23")
     expect(shiftJalaliMonth("2026-10-17", -1)).toBe("2026-08-23")
     const cells = monthCells("2026-10-17")
